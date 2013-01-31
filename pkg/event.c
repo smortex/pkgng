@@ -40,6 +40,7 @@
 static off_t fetched = 0;
 static char url[MAXPATHLEN+1];
 struct sbuf *messages = NULL;
+bool event_newpkgversion_triggered = false;
 
 int
 event_callback(void *data, struct pkg_event *ev)
@@ -220,6 +221,7 @@ event_callback(void *data, struct pkg_event *ev)
 		printf("New version of pkg detected; it needs to be "
 		    "installed first.\nAfter this upgrade it is recommended "
 		    "that you do a full upgrade using: 'pkg upgrade'\n\n");
+		event_newpkgversion_triggered = true;
 		break;
 	case PKG_EVENT_FILE_MISMATCH:
 		pkg_get(ev->e_file_mismatch.pkg, PKG_NAME, &name,

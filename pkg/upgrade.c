@@ -24,6 +24,8 @@
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
+#include <sys/wait.h>
+
 #include <err.h>
 #include <stdio.h>
 #include <sysexits.h>
@@ -33,6 +35,8 @@
 #include <pkg.h>
 
 #include "pkgcli.h"
+
+extern bool event_newpkgversion_triggered;
 
 void
 usage_upgrade(void)
@@ -53,6 +57,7 @@ exec_upgrade(int argc, char **argv)
 	bool yes;
 	bool dry_run = false;
 	bool auto_update;
+	int status;
 	nbactions = nbdone = 0;
 	pkg_flags f = PKG_FLAG_NONE | PKG_FLAG_PKG_VERSION_TEST;
 
@@ -159,11 +164,55 @@ exec_upgrade(int argc, char **argv)
 		printf("%s", sbuf_data(messages));
 	}
 
+	/*
+	 * If a newer version of pkg was available, at this point we did not
+	 * perfom the requested action but only upgraded pkg.  We still need to
+	 * upgrade all packages (as demanded).
+	 */
+	if (yes && event_newpkgversion_triggered) {
+
+		/*
+		 * Close the database now, the new version of pkg will use it
+		 * and we dont't want to mess up everything.
+		 */
+		pkg_jobs_free(jobs);
+		jobs = NULL;
+		pkgdb_close(db);
+		db = NULL;
+
+		/* Rewind argv */
+		argv -= optind;
+		argv--; /* pop pkg binary path */
+
+		/* Actually perform the desired action */
+		switch (fork()) {
+		case 0:
+			execv(argv[0], argv);
+			warn("execv");
+			goto cleanup;
+			break;
+		case -1:
+			warn("fork");
+			goto cleanup;
+			break;
+		default:
+			if (wait(&status) < 0) {
+				warn("wait");
+				goto cleanup;
+			}
+			if (!WIFEXITED(status) && WEXITSTATUS(status) != 0)
+				goto cleanup;
+			break;
+		}
+	}
+
 	retcode = EXIT_SUCCESS;
 
 	cleanup:
-	pkg_jobs_free(jobs);
-	pkgdb_close(db);
+	if (jobs)
+		pkg_jobs_free(jobs);
+	if (db)
+		pkgdb_close(db);
 
 	return (retcode);
 }
